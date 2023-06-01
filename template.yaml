@@ -1,0 +1,187 @@
+Transform: AWS::Serverless-2016-10-31
+Resources:
+  SendItemInfo:
+    Type: AWS::Serverless::Function
+    Properties:
+      Description: !Sub
+        - Stack ${AWS::StackName} Function ${ResourceName}
+        - ResourceName: SendItemInfo
+      CodeUri: src/SendItem
+      Handler: index.handler
+      Runtime: nodejs16.x
+      MemorySize: 3008
+      Timeout: 30
+      Tracing: Active
+      Environment:
+        Variables:
+          TOPIC_NAME: !GetAtt ItemTopic.TopicName
+          TOPIC_ARN: !Ref ItemTopic
+      Policies:
+        - SNSPublishMessagePolicy:
+            TopicName: !GetAtt ItemTopic.TopicName
+      Events:
+        ApiPOSTitem:
+          Type: Api
+          Properties:
+            Path: /item
+            Method: POST
+            RestApiId: !Ref Api
+  SendItemInfoLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${SendItemInfo}
+  ItemTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      Subscription:
+        - Endpoint: !GetAtt ItemQueue.Arn
+          Protocol: sqs
+  ItemQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      MessageRetentionPeriod: 345600
+  ItemTopicToItemQueuePermission:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: sns.amazonaws.com
+            Action: sqs:SendMessage
+            Resource: !GetAtt ItemQueue.Arn
+            Condition:
+              ArnEquals:
+                aws:SourceArn: !Ref ItemTopic
+      Queues:
+        - !Ref ItemQueue
+  StoreItemInfo:
+    Type: AWS::Serverless::Function
+    Properties:
+      Description: !Sub
+        - Stack ${AWS::StackName} Function ${ResourceName}
+        - ResourceName: StoreItemInfo
+      CodeUri: src/StoreInfo
+      Handler: index.handler
+      Runtime: nodejs16.x
+      MemorySize: 3008
+      Timeout: 30
+      Tracing: Active
+      Events:
+        ItemQueue:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt ItemQueue.Arn
+            BatchSize: 1
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref ItemHistoryTable
+          TABLE_ARN: !GetAtt ItemHistoryTable.Arn
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ItemHistoryTable
+  StoreItemInfoLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${StoreItemInfo}
+  ItemHistoryTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+        - AttributeName: isolate
+          AttributeType: S
+      BillingMode: PAY_PER_REQUEST
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+        - AttributeName: isolate
+          KeyType: RANGE
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      TimeToLiveSpecification:
+        AttributeName: expiration
+        Enabled: true
+  Api:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: !Sub
+        - ${ResourceName} From Stack ${AWS::StackName}
+        - ResourceName: Api
+      StageName: Prod
+      DefinitionBody:
+        openapi: '3.0'
+        info: {}
+        paths:
+          /item:
+            post:
+              x-amazon-apigateway-integration:
+                httpMethod: POST
+                type: aws_proxy
+                uri: !Sub arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${SendItemInfo.Arn}/invocations
+              responses: {}
+      EndpointConfiguration: REGIONAL
+      TracingEnabled: true
+  SendMail:
+    Type: AWS::Serverless::Function
+    Properties:
+      Description: !Sub
+        - Stack ${AWS::StackName} Function ${ResourceName}
+        - ResourceName: SendMail
+      CodeUri: src/SendMail
+      Handler: index.handler
+      Runtime: nodejs16.x
+      MemorySize: 3008
+      Timeout: 30
+      Tracing: Active
+      Events:
+        ItemTopic:
+          Type: SNS
+          Properties:
+            Topic: !Ref ItemTopic
+            Region: !Select
+              - 3
+              - !Split
+                - ':'
+                - !Ref ItemTopic
+      Policies:
+        - SESCrudPolicy:
+            IdentityName: amazon.com
+        - SESCrudPolicy:
+            IdentityName: yongzher@amazon.com
+  SendMailLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${SendMail}
+  SendSlack:
+    Type: AWS::Serverless::Function
+    Properties:
+      Description: !Sub
+        - Stack ${AWS::StackName} Function ${ResourceName}
+        - ResourceName: SendSlack
+      CodeUri: src/SendSlack
+      Handler: index.handler
+      Runtime: nodejs16.x
+      MemorySize: 3008
+      Timeout: 30
+      Tracing: Active
+      Events:
+        ItemTopic:
+          Type: SNS
+          Properties:
+            Topic: !Ref ItemTopic
+            Region: !Select
+              - 3
+              - !Split
+                - ':'
+                - !Ref ItemTopic
+  SendSlackLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${SendSlack}

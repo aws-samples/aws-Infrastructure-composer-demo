@@ -1,4 +1,4 @@
-## Application Composer Demo
+## Infrastructure Composer Demo
 
 need to change below items based on your own information :
 * replace 'ToAddresses' and 'Source' information as your own e-mail address in the "SendMail" code
